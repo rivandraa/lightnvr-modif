@@ -213,40 +213,26 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
      * codec, go2rtc_integration_reregister_stream() re-issues this call
      * with the corrected value.
      */
-// Siapkan array sources (pastikan ukurannya cukup)
-const char *sources[4];
-int num_sources = 0;
-
-// ... (misal isi elemen pertama dengan modified_url) ...
-sources[num_sources++] = modified_url;
-
-char ffmpeg_source[URL_BUFFER_SIZE];
-if (record_audio) {
-    // ASUMSI: Ganti `konfigurasi_audio_tersedia` dengan variabel/kondisi 
-    // cek konfigurasi YAML kamu (misal: config_get_string("ffmpeg.h264") != NULL)
-    int konfigurasi_audio_tersedia = 1; // Set 1 jika ada konfig, set 0 jika kosong
-
-    if (konfigurasi_audio_tersedia) {
-        // Membentuk string bersih tanpa mengunci codec tertentu di sini
-        snprintf(ffmpeg_source, sizeof(ffmpeg_source), 
-                 "ffmpeg:%s", encoded_stream_id);
-    } else {
-        // FALLBACK: Jika tidak ada konfigurasi, paksa tambahkan #audio=aac sebagai default
-        snprintf(ffmpeg_source, sizeof(ffmpeg_source), 
-                 "ffmpeg:%s#audio=aac", encoded_stream_id);
+    const char *sources[4];
+    int num_sources = 0;
+    sources[num_sources++] = modified_url;
+    
+    char ffmpeg_audio_source[URL_BUFFER_SIZE];
+    
+    if (record_audio) {
+        const char *audio_codec = (strstr(encoded_stream_id, "_sub") != NULL) ? "opus" : "aac";
+        snprintf(ffmpeg_audio_source, sizeof(ffmpeg_audio_source),
+                 "ffmpeg:%s#audio=%s", encoded_stream_id, audio_codec);
+        sources[num_sources++] = strdup(ffmpeg_audio_source);
+        log_info("Stream %s: Audio producer added as %s", encoded_stream_id, audio_codec);
     }
     
-    // AMAN: String disalin ke heap menggunakan strdup agar tidak hilang
-    sources[num_sources++] = strdup(ffmpeg_source);
-}
-
-// ... gunakan array `sources` untuk proses FFmpeg kamu ...
-
-// PENTING: Jangan lupa bebaskan memori di akhir fungsi jika strdup dilakukan
-if (record_audio) {
-    // Bebaskan elemen tempat strdup berada (dalam kasus ini indeks 1)
-    free((void*)sources[1]); 
-}
+    if (record_audio) {
+        if (sources[1] != NULL) {
+            free((void*)sources[1]);
+            sources[1] = NULL;
+        }
+    }
 
     bool is_h264 = (codec && codec[0] != '\0' && strcasecmp(codec, "h264") == 0);
     char ffmpeg_h264_source[URL_BUFFER_SIZE];
