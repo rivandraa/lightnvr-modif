@@ -35,6 +35,13 @@ jobs:
           
       - name: Push to Repository
         run: |
+          # 1. Konfigurasi autentikasi
+          git remote set-url origin https://x-access-token:${{ secrets.PAT_WORKFLOW }}@github.com/${{ github.repository }}.git
+          
+          # 2. Ambil perubahan remote terbaru agar sinkron
+          git pull origin main --rebase
+          
+          # 3. Push hasil merge tadi
           git push origin main
 
       - name: Notify to Telegram
