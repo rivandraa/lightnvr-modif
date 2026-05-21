@@ -523,15 +523,7 @@ export function WebRTCView({ isWebRTCDisabled, isHlsDisabled, isMseDisabled }) {
             >
               {t('live.hlsShort')}
             </a>
-            {go2rtcAvailable && (
-                  {!isHlsDisabled && (
-              <a
-                href="/hls.html"
-                className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
-              >
-                {t('live.hlsShort')}
-              </a>
-            )}
+            )}          
             {go2rtcAvailable && !isMseDisabled && (
               <a
                 href="/hls.html?mode=mse"
