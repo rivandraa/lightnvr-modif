@@ -213,7 +213,7 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
      * codec, go2rtc_integration_reregister_stream() re-issues this call
      * with the corrected value.
      */
-    const char *sources[3];
+    const char *sources[4];
     int num_sources = 0;
     sources[num_sources++] = modified_url;
 
