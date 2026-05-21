@@ -217,43 +217,13 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
     int num_sources = 0;
     sources[num_sources++] = modified_url;
 
-    // =================================================================
-    // PERBAIKAN: Utamakan Deteksi URL/Preload Baru Cek Nama _sub
-    // =================================================================
     char ffmpeg_audio_source[URL_BUFFER_SIZE];
-    char extracted_codec[32] = "aac"; // Default awal jika benar-benar kosong
-
     if (record_audio) {
-        // PRIORITAS 1: Cek secara dinamis dari stream_url / preload (Misal "audio=mp3")
-        if (stream_url && strstr(stream_url, "audio=") != NULL) {
-            const char *p = strstr(stream_url, "audio=");
-            p += 6; // Geser pointer setelah kata "audio="
-            
-            // Ambil kata codec-nya sampai mentok karakter '&', '#' atau selesai string
-            int i = 0;
-            while (p[i] != '\0' && p[i] != '&' && p[i] != '#' && i < (int)sizeof(extracted_codec) - 1) {
-                extracted_codec[i] = p[i];
-                i++;
-            }
-            extracted_codec[i] = '\0'; // Kunci akhir string
-        }
-        // PRIORITAS 2: Jika di URL tidak diatur, tapi nama ID mengandung "_sub", pakai opus
-        else if (strstr(encoded_stream_id, "_sub") != NULL) {
-            strncpy(extracted_codec, "opus", sizeof(extracted_codec) - 1);
-        }
-        // PRIORITAS 3: Cek dari argumen parameter 'codec' bawaan luar
-        else if (codec && codec[0] != '\0' && strcasecmp(codec, "h264") != 0) {
-            strncpy(extracted_codec, codec, sizeof(extracted_codec) - 1);
-        }
-
-        // Sekarang string akan tercetak dengan benar sesuai apa yang kamu override di Advanced YAML
+        const char *audio_codec = (strstr(encoded_stream_id, "_sub") != NULL) ? "opus" : "aac";
         snprintf(ffmpeg_audio_source, sizeof(ffmpeg_audio_source),
-                 "ffmpeg:%s#audio=%s", encoded_stream_id, extracted_codec);
-        
-        // AMAN: Salin ke heap agar tidak dangling
+                 "ffmpeg:%s#audio=%s", encoded_stream_id, audio_codec);
         sources[num_sources++] = strdup(ffmpeg_audio_source);
-        
-        log_info("Stream %s: Integrated with ffmpeg preset #audio=%s", stream_id, extracted_codec);
+        log_info("Stream %s: Audio producer added as %s", encoded_stream_id, audio_codec);
     }
 
     bool is_h264 = (codec && codec[0] != '\0' && strcasecmp(codec, "h264") == 0);
