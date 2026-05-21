@@ -34,7 +34,7 @@ function legacyLayoutToColsRowsWebRTC(layout) {
  * WebRTCView component
  * @returns {JSX.Element} WebRTCView component
  */
-export function WebRTCView() {
+export function WebRTCView({ isWebRTCDisabled, isHlsDisabled, isMseDisabled }) {
   const { t } = useI18n();
 
   // Use the snapshot manager hook
@@ -524,6 +524,15 @@ export function WebRTCView() {
               {t('live.hlsShort')}
             </a>
             {go2rtcAvailable && (
+                  {!isHlsDisabled && (
+              <a
+                href="/hls.html"
+                className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
+              >
+                {t('live.hlsShort')}
+              </a>
+            )}
+            {go2rtcAvailable && !isMseDisabled && (
               <a
                 href="/hls.html?mode=mse"
                 className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
