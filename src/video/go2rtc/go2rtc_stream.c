@@ -213,20 +213,15 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
      * codec, go2rtc_integration_reregister_stream() re-issues this call
      * with the corrected value.
      */
-    const char *sources[4];
+    const char *sources[3];
     int num_sources = 0;
     sources[num_sources++] = modified_url;
 
-   char ffmpeg_audio_source[URL_BUFFER_SIZE];
+    char ffmpeg_aac_source[URL_BUFFER_SIZE];
     if (record_audio) {
-        // Jika ID mengandung "_sub", gunakan opus. Jika tidak, gunakan aac.
-        const char *audio_codec = (strstr(encoded_stream_id, "_sub") != NULL) ? "opus" : "aac";
-        
-        snprintf(ffmpeg_audio_source, sizeof(ffmpeg_audio_source),
-                 "ffmpeg:%s#audio=%s", encoded_stream_id, audio_codec);
-        sources[num_sources++] = ffmpeg_audio_source;
-        
-        log_info("Stream %s: Audio producer added as %s", encoded_stream_id, audio_codec);
+        snprintf(ffmpeg_aac_source, sizeof(ffmpeg_aac_source),
+                 "ffmpeg:%s#audio=aac", encoded_stream_id);
+        sources[num_sources++] = ffmpeg_aac_source;
     }
 
     bool is_h264 = (codec && codec[0] != '\0' && strcasecmp(codec, "h264") == 0);
