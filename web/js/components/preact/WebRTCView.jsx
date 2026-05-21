@@ -518,12 +518,18 @@ export function WebRTCView({ isWebRTCDisabled, isHlsDisabled, isMseDisabled }) {
               WebRTC
             </span>
             <a
-              href="/hls.html"
-              className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
-            >
-              {t('live.hlsShort')}
-            </a>
-            )}          
+
+            {/* Tab HLS */}
+            {!isHlsDisabled && (
+              <a
+                href="/hls.html"
+                className="px-3 py-1.5 rounded text-sm font-medium transition-colors no-underline text-muted-foreground hover:bg-background hover:text-foreground focus:outline-none"
+              >
+                {t('live.hlsShort')}
+              </a>
+            )}
+    
+            {/* Tab MSE */}
             {go2rtcAvailable && !isMseDisabled && (
               <a
                 href="/hls.html?mode=mse"
@@ -534,6 +540,7 @@ export function WebRTCView({ isWebRTCDisabled, isHlsDisabled, isMseDisabled }) {
             )}
           </div>
         </div>
+        
         <div className="controls flex items-center space-x-2">
           {availableTags.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap">
