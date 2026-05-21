@@ -218,18 +218,14 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
     sources[num_sources++] = modified_url;
 
     // =================================================================
-    // MODIFIKASI DINAMIS: Mendeteksi Opus, MP3, AAC, dll. Otomatis
+    // PERBAIKAN: Utamakan Deteksi URL/Preload Baru Cek Nama _sub
     // =================================================================
     char ffmpeg_audio_source[URL_BUFFER_SIZE];
-    char extracted_codec[32] = "aac"; // Default awal jika tidak ketemu apa-apa
+    char extracted_codec[32] = "aac"; // Default awal jika benar-benar kosong
 
     if (record_audio) {
-        // 1. Cek dari nama stream id (Aturan khusus: jika ada "_sub" otomatis ke opus)
-        if (strstr(encoded_stream_id, "_sub") != NULL) {
-            strncpy(extracted_codec, "opus", sizeof(extracted_codec) - 1);
-        }
-        // 2. Cek secara dinamis dari stream_url (Misal mencari tulisan "audio=mp3" atau "audio=opus")
-        else if (stream_url && strstr(stream_url, "audio=") != NULL) {
+        // PRIORITAS 1: Cek secara dinamis dari stream_url / preload (Misal "audio=mp3")
+        if (stream_url && strstr(stream_url, "audio=") != NULL) {
             const char *p = strstr(stream_url, "audio=");
             p += 6; // Geser pointer setelah kata "audio="
             
@@ -241,13 +237,16 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
             }
             extracted_codec[i] = '\0'; // Kunci akhir string
         }
-        // 3. Cek dari argumen parameter 'codec' (jika diisi oleh sistem luar)
+        // PRIORITAS 2: Jika di URL tidak diatur, tapi nama ID mengandung "_sub", pakai opus
+        else if (strstr(encoded_stream_id, "_sub") != NULL) {
+            strncpy(extracted_codec, "opus", sizeof(extracted_codec) - 1);
+        }
+        // PRIORITAS 3: Cek dari argumen parameter 'codec' bawaan luar
         else if (codec && codec[0] != '\0' && strcasecmp(codec, "h264") != 0) {
-            // Pastikan bukan h264 (karena h264 adalah codec video)
             strncpy(extracted_codec, codec, sizeof(extracted_codec) - 1);
         }
 
-        // Sekarang #audio= akan mengikuti apa pun yang tertulis (bisa mp3, opus, aac)
+        // Sekarang string akan tercetak dengan benar sesuai apa yang kamu override di Advanced YAML
         snprintf(ffmpeg_audio_source, sizeof(ffmpeg_audio_source),
                  "ffmpeg:%s#audio=%s", encoded_stream_id, extracted_codec);
         
