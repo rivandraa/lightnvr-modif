@@ -217,11 +217,44 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
     int num_sources = 0;
     sources[num_sources++] = modified_url;
 
-    char ffmpeg_aac_source[URL_BUFFER_SIZE];
+    // =================================================================
+    // MODIFIKASI DINAMIS: Mendeteksi Opus, MP3, AAC, dll. Otomatis
+    // =================================================================
+    char ffmpeg_audio_source[URL_BUFFER_SIZE];
+    char extracted_codec[32] = "aac"; // Default awal jika tidak ketemu apa-apa
+
     if (record_audio) {
-        snprintf(ffmpeg_aac_source, sizeof(ffmpeg_aac_source),
-                 "ffmpeg:%s#audio=aac", encoded_stream_id);
-        sources[num_sources++] = ffmpeg_aac_source;
+        // 1. Cek dari nama stream id (Aturan khusus: jika ada "_sub" otomatis ke opus)
+        if (strstr(encoded_stream_id, "_sub") != NULL) {
+            strncpy(extracted_codec, "opus", sizeof(extracted_codec) - 1);
+        }
+        // 2. Cek secara dinamis dari stream_url (Misal mencari tulisan "audio=mp3" atau "audio=opus")
+        else if (stream_url && strstr(stream_url, "audio=") != NULL) {
+            const char *p = strstr(stream_url, "audio=");
+            p += 6; // Geser pointer setelah kata "audio="
+            
+            // Ambil kata codec-nya sampai mentok karakter '&', '#' atau selesai string
+            int i = 0;
+            while (p[i] != '\0' && p[i] != '&' && p[i] != '#' && i < (int)sizeof(extracted_codec) - 1) {
+                extracted_codec[i] = p[i];
+                i++;
+            }
+            extracted_codec[i] = '\0'; // Kunci akhir string
+        }
+        // 3. Cek dari argumen parameter 'codec' (jika diisi oleh sistem luar)
+        else if (codec && codec[0] != '\0' && strcasecmp(codec, "h264") != 0) {
+            // Pastikan bukan h264 (karena h264 adalah codec video)
+            strncpy(extracted_codec, codec, sizeof(extracted_codec) - 1);
+        }
+
+        // Sekarang #audio= akan mengikuti apa pun yang tertulis (bisa mp3, opus, aac)
+        snprintf(ffmpeg_audio_source, sizeof(ffmpeg_audio_source),
+                 "ffmpeg:%s#audio=%s", encoded_stream_id, extracted_codec);
+        
+        // AMAN: Salin ke heap agar tidak dangling
+        sources[num_sources++] = strdup(ffmpeg_audio_source);
+        
+        log_info("Stream %s: Integrated with ffmpeg preset #audio=%s", stream_id, extracted_codec);
     }
 
     bool is_h264 = (codec && codec[0] != '\0' && strcasecmp(codec, "h264") == 0);
@@ -248,13 +281,15 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
         result = go2rtc_api_add_stream(encoded_stream_id, modified_url);
     }
 
-    if (result) {
-        log_info("Successfully registered stream %s with go2rtc (%d source%s)",
-                 encoded_stream_id, num_sources, num_sources == 1 ? "" : "s");
-    } else {
-        log_error("Failed to register stream %s with go2rtc", encoded_stream_id);
+    // MEMORY CLEANUP: Bebaskan memori strdup tepat sebelum fungsi keluar
+    if (record_audio && num_sources > 1) {
+        for (int i = 0; i < num_sources; i++) {
+            if (sources[i] && strncmp(sources[i], "ffmpeg:", 7) == 0 && strstr(sources[i], "#audio=") != NULL) {
+                free((void*)sources[i]);
+                break;
+            }
+        }
     }
-
     // Intentionally do NOT preload here.
     //
     // Registration happens during startup for every enabled stream.  Preloading
