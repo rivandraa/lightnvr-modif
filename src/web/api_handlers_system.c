@@ -1643,6 +1643,7 @@ void handle_post_system_export(const http_request_t *req, http_response_t *res) 
         "--exclude='database/lightnvr.db.backups' "
         "--exclude='database/*.db-wal' "
         "--exclude='database/*.db-shm' "
+        "--exclude='etc/lightnvr/go2rtc.yaml' " // Tambahkan baris ini
         "-C /var/lib/lightnvr/data database "
         "-C /etc lightnvr "
         "> /dev/null 2>&1",
