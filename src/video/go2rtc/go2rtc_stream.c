@@ -215,64 +215,61 @@ bool go2rtc_stream_register(const char *stream_id, const char *stream_url,
      */
     const char *sources[4];
     int num_sources = 0;
-
-    // 1. Tambahkan primary URL (Bukan hasil strdup, jangan di-free nanti)
+    
+    // 1. Tambahkan primary URL (Tidak perlu di-free)
     sources[num_sources++] = modified_url;
-
-    // 2. Logika Audio (Menggunakan strdup agar aman)
-    // Tandai indeks ini untuk dibersihkan nanti
-    int audio_idx = -1;
-    if (record_audio) {
-        char audio_buf[URL_BUFFER_SIZE];
-        const char *audio_codec = (strstr(encoded_stream_id, "_sub") != NULL) ? "opus" : "aac";
-        snprintf(audio_buf, sizeof(audio_buf), "ffmpeg:%s#audio=%s", encoded_stream_id, audio_codec);
-        
-        sources[num_sources] = strdup(audio_buf);
-        audio_idx = num_sources; // Simpan indeks untuk cleanup
-        num_sources++;
-        
-        log_info("Stream %s: Audio producer added as %s", encoded_stream_id, audio_codec);
-    }
-
-    // 3. Logika Video (Menggunakan strdup agar aman)
-    int video_idx = -1;
-    bool is_h264 = (codec && codec[0] != '\0' && strcasecmp(codec, "h264") == 0);
+    
+    // 2. Logika Gabungan (Audio + Video dalam 1 string)
+    char combined_buf[URL_BUFFER_SIZE];
+    int combined_idx = -1;
+    
+    // Tentukan codec & parameter
+    const char *audio_codec = (strstr(encoded_stream_id, "_sub") != NULL) ? "opus" : "aac";
+    
+    // Deteksi h264 yang akurat dan aman (Tahan terhadap variasi metadata)
+    bool is_h264 = (codec != NULL && strcasestr(codec, "h264") != NULL);
+    
+    // Kita buat satu string gabungan yang efisien
     if (!is_h264) {
-        char video_buf[URL_BUFFER_SIZE];
-        snprintf(video_buf, sizeof(video_buf), "ffmpeg:%s#video=h264#hardware", encoded_stream_id);
-        
-        sources[num_sources] = strdup(video_buf);
-        video_idx = num_sources; // Simpan indeks untuk cleanup
+        // Jika bukan H264, kita paksa transcoding video ke H264 dengan hardware
+        snprintf(combined_buf, sizeof(combined_buf), 
+                 "ffmpeg:%s#video=h264#audio=%s#hardware", 
+                 encoded_stream_id, audio_codec);
+    } else {
+        // Jika sudah H264, hanya butuh audio (Direct stream/Remuxing)
+        snprintf(combined_buf, sizeof(combined_buf), 
+                 "ffmpeg:%s#audio=%s", 
+                 encoded_stream_id, audio_codec);
+    }
+    
+    // Alokasi memori hanya sekali untuk gabungan ini
+    sources[num_sources] = strdup(combined_buf);
+    if (sources[num_sources] != NULL) {
+        combined_idx = num_sources;
         num_sources++;
-        
-        log_info("Stream %s codec=%s; adding ffmpeg H.264 fallback source for WebRTC",
-                 stream_id, (codec && codec[0]) ? codec : "unknown");
-    } else {
-        log_info("Stream %s codec=h264; no transcoding fallback needed", stream_id);
+        log_info("Stream %s: Combined producer added (audio=%s, h264_detected=%s)", 
+                 encoded_stream_id, audio_codec, is_h264 ? "yes" : "no");
     }
-
-    // 4. Registrasi ke go2rtc
-    bool result;
-    if (num_sources > 1) {
-        result = go2rtc_api_add_stream_multi(encoded_stream_id, sources, num_sources);
-        if (!result) {
-            log_error("Failed to register stream %s with go2rtc; falling back to primary-only", encoded_stream_id);
-            result = go2rtc_api_add_stream(encoded_stream_id, modified_url);
-        }
-    } else {
-        result = go2rtc_api_add_stream(encoded_stream_id, modified_url);
+    
+    // 3. Registrasi ke go2rtc
+    bool result = false;
+    if (num_sources > 0) {
+        // Gunakan multi jika ada tambahan, atau single jika hanya primary
+        result = (num_sources > 1) 
+                 ? go2rtc_api_add_stream_multi(encoded_stream_id, sources, num_sources)
+                 : go2rtc_api_add_stream(encoded_stream_id, modified_url);
     }
-
+    
     if (result) {
-        log_info("Successfully registered stream %s with go2rtc (%d source%s)",
-                 encoded_stream_id, num_sources, num_sources == 1 ? "" : "s");
+        log_info("Successfully registered stream %s", encoded_stream_id);
     } else {
-        log_error("Failed to register stream %s with go2rtc", encoded_stream_id);
+        log_error("Failed to register stream %s", encoded_stream_id);
     }
-
-    // 5. MEMORY CLEANUP: Hanya bebaskan yang di-strdup (audio dan video)
-    if (audio_idx != -1) free((void*)sources[audio_idx]);
-    if (video_idx != -1) free((void*)sources[video_idx]);
+    
+    // 4. CLEANUP: Hanya bebaskan jika alokasi berhasil
+    if (combined_idx != -1) {
+        free((void*)sources[combined_idx]);
+    }
     
     // Intentionally do NOT preload here.
     //
