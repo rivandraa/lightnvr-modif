@@ -1191,7 +1191,6 @@ export function HLSVideoCell({
             zIndex: 10,
             pointerEvents: 'none'
           }}
-          title={t('live.mseLowLatencyStreaming')}
         >
           HLS
         </div>
