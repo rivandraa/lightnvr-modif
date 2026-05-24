@@ -470,7 +470,8 @@ export function PTZControls({
         gap: '8px',
         minWidth: '160px',
         touchAction: 'none',
-        userSelect: 'none'
+        userSelect: 'none',
+        pointerEvents: 'auto'
       }}
     >
 
@@ -502,7 +503,17 @@ export function PTZControls({
 
         {onClose && (
           <button
-            onClick={onClose}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onClose?.();
+            }}
+            onTouchStart={(e) => {
+              e.stopPropagation();
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+            }}
             style={{
               background: 'none',
               border: 'none',
@@ -510,7 +521,9 @@ export function PTZControls({
               padding: '0 4px',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              touchAction: 'manipulation',
+              zIndex: 9999
             }}
           >
             <svg
@@ -521,18 +534,8 @@ export function PTZControls({
               stroke="white"
               strokeWidth="2"
             >
-              <line
-                x1="18"
-                y1="6"
-                x2="6"
-                y2="18"
-              />
-              <line
-                x1="6"
-                y1="6"
-                x2="18"
-                y2="18"
-              />
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         )}
