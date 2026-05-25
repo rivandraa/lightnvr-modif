@@ -612,22 +612,20 @@ export function MSEVideoCell({
       {/* Stream name label */}
       {showLabels && (
         <div
-          className="stream-name-label"
+          className="stream-name-overlay"
           style={{
             position: 'absolute',
-            top: '8px',
-            left: '8px',
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            top: '10px',
+            left: '10px',
+            padding: '5px 10px',
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
             color: 'white',
-            padding: '4px 8px',
             borderRadius: '4px',
             fontSize: '14px',
-            fontWeight: 'bold',
-            zIndex: 10,
-            pointerEvents: 'none',
+            zIndex: 3,
             display: 'flex',
             alignItems: 'center',
-            gap: '6px'
+            gap: '8px'
           }}
         >
           <span
