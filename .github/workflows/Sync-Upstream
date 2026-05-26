@@ -1,16 +1,19 @@
-name: Sync Upstream
+name: Sync Upstream FIX FINAL
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   sync:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout destination repo
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.PAT_WORKFLOW }}
           fetch-depth: 0
 
       - name: Setup Git
@@ -18,62 +21,133 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Sync with Upstream
+      - name: Add upstream
         run: |
-          git remote add upstream https://github.com/opensensor/lightNVR.git || true
+          git remote remove upstream || true
+          git remote add upstream https://github.com/opensensor/lightNVR.git
           git fetch upstream main
-          
-          # 1. Merge tanpa berhenti, biarkan Git memasukkan marker <<<<<<<
-          # Kita tidak menggunakan -X ours agar konflik tetap muncul/terdeteksi
-          git merge upstream/main --no-commit --no-ff || echo "⚠️ Konflik terdeteksi, melanjutkan merge..."
-          
-          # 2. Add dan Commit semua, termasuk file yang mengandung marker konflik
-          git add -A
-          git commit -m "Sync: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
-          
-      - name: Push to Repository
-        run: |
-          # 1. Konfigurasi autentikasi
-          git remote set-url origin https://x-access-token:${{ secrets.PAT_WORKFLOW }}@github.com/${{ github.repository }}.git
-          
-          # 2. Ambil perubahan remote terbaru agar sinkron
-          git pull origin main --rebase
-          
-          # 3. Push hasil merge tadi
-          git push origin main
 
-      - name: Notify to Telegram
-        if: always()
+      - name: Get upstream commits
+        id: commits
+        run: |
+          LATEST=$(git rev-parse upstream/main)
+          echo "latest=$LATEST" >> $GITHUB_OUTPUT
+
+          if [ -f .last-upstream-commit ]; then
+            LAST=$(cat .last-upstream-commit)
+          else
+            LAST=$(git rev-parse upstream/main~1)
+          fi
+
+          echo "last=$LAST" >> $GITHUB_OUTPUT
+
+      - name: Get changed files
+        run: |
+          git diff --name-only ${{ steps.commits.outputs.last }} ${{ steps.commits.outputs.latest }} \
+          | grep -v "^$" > changed_files.txt || true
+
+      - name: Merge safely (3-way merge)
+        run: |
+          HAS_CONFLICTS="false"
+
+          while read file; do
+            [ -z "$file" ] && continue
+            [ ! -f "$file" ] && continue
+
+            echo "🔄 Processing: $file"
+
+            BASE=".git/base.tmp"
+            UP=".git/up.tmp"
+
+            mkdir -p "$(dirname "$BASE")"
+
+            git show "${{ steps.commits.outputs.last }}:$file" > "$BASE" 2>/dev/null || true
+            git show upstream/main:"$file" > "$UP" 2>/dev/null || true
+
+            if [ ! -s "$UP" ]; then
+              continue
+            fi
+
+            if ! git merge-file -p -L LOCAL -L BASE -L UPSTREAM \
+              "$file" "$BASE" "$UP" > "$file.merged"; then
+              echo "⚠️ CONFLICT: $file"
+              HAS_CONFLICTS="true"
+            fi
+
+            mv "$file.merged" "$file"
+
+          done < changed_files.txt
+
+          echo "has_conflicts=$HAS_CONFLICTS" >> $GITHUB_OUTPUT
+
+      - name: Commit changes
+        run: |
+          echo "${{ steps.commits.outputs.latest }}" > .last-upstream-commit
+
+          git add -A
+          git add .last-upstream-commit
+
+          if ! git diff --cached --quiet; then
+            if grep -qr '<<<<<<<' .; then
+              MSG="⚠️ Sync upstream (CONFLICT): ${{ steps.commits.outputs.latest }}"
+            else
+              MSG="✅ Sync upstream clean: ${{ steps.commits.outputs.latest }}"
+            fi
+
+            git commit -m "$MSG"
+
+            # FIX 403: pakai GITHUB_TOKEN default
+            git push origin HEAD:main
+          else
+            echo "No changes to commit"
+          fi
+
+      - name: Telegram notify (STABLE UPSTREAM DIFF)
         run: |
           REPO_URL="https://github.com/${{ github.repository }}"
           BRANCH="main"
-          
-          # Mengambil daftar file yang berubah saja (Lebih akurat dari git diff HEAD^ HEAD)
-          FILES=$(git diff --name-status HEAD^ HEAD | grep -v ".github/workflows/" || true)
-
-          if [ -n "$FILES" ]; then
-            CHANGED=$(echo "$FILES" | while read status path; do
-              FILENAME=$(basename "$path")
-              ENCODED_PATH=$(echo "$path" | sed 's/ /%20/g')
-              
-              case "$status" in
-                A*) ICON="🆕"; NOTE=" [New]" ;;
-                M*) ICON="✏️"; NOTE=" [Modified]" ;;
-                D*) ICON="❌"; NOTE=" [Deleted]" ;;
-                *)  ICON="📄"; NOTE=" [Updated]" ;;
-              esac
-              
-              # Escape karakter khusus untuk Markdown Telegram agar tidak error
-              SAFE_NAME=$(echo "$FILENAME" | sed 's/[[*()_`]/\\&/g')
-              echo "- $ICON [$SAFE_NAME]($REPO_URL/blob/$BRANCH/$ENCODED_PATH)$NOTE"
-            done)
-            
-            MSG=$(printf "🛎️ *Sync dari upstream selesai*\n\n*Status File:*\n%s" "$CHANGED")
+      
+          # Ambil diff upstream
+          FILES=$(git diff --name-status \
+            ${{ steps.commits.outputs.last }} \
+            ${{ steps.commits.outputs.latest }} \
+            | grep -v "^.github/workflows/" || true)
+      
+          if [ -z "$FILES" ]; then
+            MSG=$(printf "🛎️ Sync selesai\n\nTidak ada update dari upstream.")
           else
-            MSG=$(printf "🛎️ *Sync dari upstream selesai*\n\nTidak ada Update.")
+            MSG=$(printf "🛎️ *Sync dari upstream selesai*\n\n")
+      
+            CURRENT_FOLDER=""
+      
+            while read status path; do
+              [ -z "$path" ] && continue
+      
+              FOLDER=$(dirname "$path")
+              FILE=$(basename "$path")
+      
+              # FIX root folder
+              [ "$FOLDER" = "." ] && FOLDER="root"
+      
+              case "$status" in
+                A*) ICON="🆕";;
+                M*) ICON="✏️";;
+                D*) ICON="❌";;
+                *)  ICON="📄";;
+              esac
+      
+              # folder grouping
+              if [ "$FOLDER" != "$CURRENT_FOLDER" ]; then
+                MSG+=$(printf "\n📁 *%s/*\n" "$FOLDER")
+                CURRENT_FOLDER="$FOLDER"
+              fi
+      
+              MSG+=$(printf "- %s [%s](%s/blob/%s/%s)\n" \
+                "$ICON" "$FILE" "$REPO_URL" "$BRANCH" "$path")
+      
+            done <<< "$FILES"
           fi
-
-          # KIRIM SATU KALI SAJA dengan data-urlencode
+      
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
             --data-urlencode "text=$MSG" \
