@@ -107,7 +107,6 @@ jobs:
           REPO_URL="https://github.com/${{ github.repository }}"
           BRANCH="main"
       
-          # Ambil diff upstream
           FILES=$(git diff --name-status \
             ${{ steps.commits.outputs.last }} \
             ${{ steps.commits.outputs.latest }} \
@@ -126,7 +125,6 @@ jobs:
               FOLDER=$(dirname "$path")
               FILE=$(basename "$path")
       
-              # FIX root folder
               [ "$FOLDER" = "." ] && FOLDER="root"
       
               case "$status" in
@@ -136,13 +134,12 @@ jobs:
                 *)  ICON="📄";;
               esac
       
-              # folder grouping
               if [ "$FOLDER" != "$CURRENT_FOLDER" ]; then
                 MSG+=$(printf "\n📁 *%s/*\n" "$FOLDER")
                 CURRENT_FOLDER="$FOLDER"
               fi
       
-              MSG+=$(printf "- %s [%s](%s/blob/%s/%s)\n" \
+              MSG+=$(printf -- "- %s [%s](%s/blob/%s/%s)\n" \
                 "$ICON" "$FILE" "$REPO_URL" "$BRANCH" "$path")
       
             done <<< "$FILES"
