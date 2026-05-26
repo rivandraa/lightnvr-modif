@@ -1,4 +1,4 @@
-name: Sync Upstream
+name: Sync Upstream FINAL
 
 on:
   workflow_dispatch:
@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # =========================================================
+      # CHECKOUT
+      # =========================================================
       - name: Checkout destination repo
         uses: actions/checkout@v4
         with:
@@ -23,55 +26,187 @@ jobs:
           token: ${{ secrets.PAT_WORKFLOW }}
           fetch-depth: 0
 
+      # =========================================================
+      # SETUP GIT
+      # =========================================================
       - name: Setup Git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Sync with Upstream
+      # =========================================================
+      # FETCH UPSTREAM
+      # =========================================================
+      - name: Add upstream and fetch
         run: |
           git remote remove upstream || true
           git remote add upstream https://github.com/opensensor/lightNVR.git
           git fetch upstream main
 
-          # Merge upstream tanpa menghentikan workflow
-          git merge upstream/main --no-commit --no-ff || \
-          echo "⚠️ Konflik terdeteksi, melanjutkan..."
+      # =========================================================
+      # GET COMMIT RANGE
+      # =========================================================
+      - name: Get upstream commits
+        id: commits
+        run: |
+          LATEST=$(git rev-parse upstream/main)
 
-          # Commit semua termasuk marker conflict
+          if [ -f .last-upstream-commit ]; then
+            LAST=$(cat .last-upstream-commit)
+          else
+            LAST=$(git rev-parse upstream/main~1)
+          fi
+
+          echo "latest=$LATEST" >> $GITHUB_OUTPUT
+          echo "last=$LAST" >> $GITHUB_OUTPUT
+
+      # =========================================================
+      # DETERMINE CHANGED FILES
+      # =========================================================
+      - name: Determine changed files
+        id: changed
+        run: |
+          git diff --name-only \
+            ${{ steps.commits.outputs.last }} \
+            ${{ steps.commits.outputs.latest }} \
+            > changed_files.txt || true
+
+          echo "Changed files:"
+          cat changed_files.txt || true
+
+          if [ ! -s changed_files.txt ]; then
+            echo "no_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "no_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      # =========================================================
+      # MERGE FILE BY FILE (SAFE)
+      # =========================================================
+      - name: Merge upstream changes safely
+        if: steps.changed.outputs.no_changes == 'false'
+        run: |
+          HAS_CONFLICTS="false"
+
+          while IFS= read -r file || [ -n "$file" ]; do
+
+            [ -z "$file" ] && continue
+
+            echo "🔄 Processing: $file"
+
+            LOCAL_FILE="$file"
+
+            BASE_FILE=".git/base.tmp"
+            UPSTREAM_FILE=".git/upstream.tmp"
+
+            mkdir -p "$(dirname "$LOCAL_FILE")"
+
+            # BASE (old upstream version)
+            git show "${{ steps.commits.outputs.last }}:$file" \
+              > "$BASE_FILE" 2>/dev/null || touch "$BASE_FILE"
+
+            # UPSTREAM (new upstream version)
+            git show "upstream/main:$file" \
+              > "$UPSTREAM_FILE" 2>/dev/null || true
+
+            # FILE BARU DARI UPSTREAM
+            if [ ! -f "$LOCAL_FILE" ]; then
+              cp "$UPSTREAM_FILE" "$LOCAL_FILE"
+              echo "🆕 New file from upstream"
+              continue
+            fi
+
+            # FILE DIHAPUS DI UPSTREAM
+            if [ ! -s "$UPSTREAM_FILE" ]; then
+              echo "❌ Deleted upstream file: $file"
+              rm -f "$LOCAL_FILE"
+              continue
+            fi
+
+            # MERGE MANUAL
+            if ! git merge-file -p \
+              -L LOCAL \
+              -L BASE \
+              -L UPSTREAM \
+              "$LOCAL_FILE" \
+              "$BASE_FILE" \
+              "$UPSTREAM_FILE" \
+              > "$LOCAL_FILE.merged"; then
+
+              echo "⚠️ Conflict detected: $file"
+              HAS_CONFLICTS="true"
+            fi
+
+            mv "$LOCAL_FILE.merged" "$LOCAL_FILE"
+
+          done < changed_files.txt
+
+          echo "HAS_CONFLICTS=$HAS_CONFLICTS" >> $GITHUB_ENV
+
+      # =========================================================
+      # SAVE LAST UPSTREAM COMMIT
+      # =========================================================
+      - name: Save latest upstream commit
+        if: steps.changed.outputs.no_changes == 'false'
+        run: |
+          echo "${{ steps.commits.outputs.latest }}" > .last-upstream-commit
+
+      # =========================================================
+      # COMMIT
+      # =========================================================
+      - name: Commit changes
+        if: steps.changed.outputs.no_changes == 'false'
+        run: |
           git add -A
 
-          git commit -m "Sync: $(date +'%Y-%m-%d %H:%M:%S')" || \
-          echo "No changes to commit"
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
 
-      - name: Push to Repository
+          if grep -qr '<<<<<<< LOCAL' .; then
+            COMMIT_MSG="⚠️ Sync upstream with conflicts"
+          else
+            COMMIT_MSG="Sync upstream"
+          fi
+
+          git commit -m "$COMMIT_MSG"
+
+      # =========================================================
+      # PUSH
+      # =========================================================
+      - name: Push changes
+        if: steps.changed.outputs.no_changes == 'false'
         run: |
           git remote set-url origin \
           https://x-access-token:${{ secrets.PAT_WORKFLOW }}@github.com/${{ github.repository }}.git
 
-          # Sinkron branch tujuan
-          git pull origin ${{ github.event.inputs.target_branch }} --rebase || true
-
-          # Push ke branch pilihan
           git push origin HEAD:${{ github.event.inputs.target_branch }}
 
-      - name: Notify to Telegram
+      # =========================================================
+      # TELEGRAM
+      # =========================================================
+      - name: Notify Telegram
         if: always()
         run: |
           REPO_URL="https://github.com/${{ github.repository }}"
           BRANCH="${{ github.event.inputs.target_branch }}"
 
-          FILES=$(git diff --name-status HEAD~1 HEAD \
+          FILES=$(git diff --name-status \
+            ${{ steps.commits.outputs.last }} \
+            ${{ steps.commits.outputs.latest }} \
             | grep -v "^.github/workflows/" || true)
 
           if [ -z "$FILES" ]; then
             MSG=$(printf "🛎️ Sync selesai\n\nTidak ada update dari upstream.")
           else
+
             MSG=$(printf "🛎️ *Sync dari upstream selesai*\n\n")
 
             CURRENT_FOLDER=""
 
             while read status path; do
+
               [ -z "$path" ] && continue
 
               FOLDER=$(dirname "$path")
@@ -86,19 +221,25 @@ jobs:
                 *)  ICON="📄";;
               esac
 
-              # Group per folder
               if [ "$FOLDER" != "$CURRENT_FOLDER" ]; then
                 MSG+=$(printf "\n📁 *%s/*\n" "$FOLDER")
                 CURRENT_FOLDER="$FOLDER"
               fi
 
-              # Escape markdown telegram
               SAFE_FILE=$(echo "$FILE" | sed 's/[][()_*`]/\\&/g')
 
               MSG+=$(printf -- "- %s [%s](%s/blob/%s/%s)\n" \
-                "$ICON" "$SAFE_FILE" "$REPO_URL" "$BRANCH" "$path")
+                "$ICON" \
+                "$SAFE_FILE" \
+                "$REPO_URL" \
+                "$BRANCH" \
+                "$path")
 
             done <<< "$FILES"
+
+            if [ "$HAS_CONFLICTS" = "true" ]; then
+              MSG+=$(printf "\n⚠️ *Conflict marker detected*")
+            fi
           fi
 
           curl -s -X POST \
