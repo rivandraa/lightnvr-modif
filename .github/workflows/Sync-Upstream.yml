@@ -201,40 +201,35 @@ jobs:
             MSG=$(printf "🛎️ Sync selesai\n\nTidak ada update dari upstream.")
           else
 
-            MSG=$(printf "🛎️ *Sync dari upstream selesai*\n\n")
-
+            MSG=$(printf "🛎️ *Sync dari upstream selesai*\n")
+            
             CURRENT_FOLDER=""
-
+            
             while read status path; do
-
+            
               [ -z "$path" ] && continue
-
+            
               FOLDER=$(dirname "$path")
               FILE=$(basename "$path")
-
+            
               [ "$FOLDER" = "." ] && FOLDER="root"
-
+            
               case "$status" in
                 A*) ICON="🆕";;
                 M*) ICON="✏️";;
                 D*) ICON="❌";;
                 *)  ICON="📄";;
               esac
-
+            
+              # Folder baru
               if [ "$FOLDER" != "$CURRENT_FOLDER" ]; then
-                MSG+=$(printf "\n📁 *%s/*\n" "$FOLDER")
+                MSG+=$'\n'
+                MSG+="📁 $FOLDER/ :"$'\n'
                 CURRENT_FOLDER="$FOLDER"
               fi
-
-              SAFE_FILE=$(echo "$FILE" | sed 's/[][()_*`]/\\&/g')
-
-              MSG+=$(printf -- "- %s [%s](%s/blob/%s/%s)\n" \
-                "$ICON" \
-                "$SAFE_FILE" \
-                "$REPO_URL" \
-                "$BRANCH" \
-                "$path")
-
+            
+              MSG+="$ICON [$FILE]($REPO_URL/blob/$BRANCH/$path)"$'\n'
+            
             done <<< "$FILES"
 
             if [ "$HAS_CONFLICTS" = "true" ]; then
