@@ -9,7 +9,7 @@ on:
         type: choice
         options:
           - sync-main
-        default: -
+        default: "-"
 
 permissions:
   contents: write
