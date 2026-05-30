@@ -382,12 +382,12 @@ export function PTZControls({
   );
 
   const handleMoveStop = useCallback(() => {
-
-    if (!stream?.name || !isMoving)
+  
+    if (!stream?.name)
       return;
-
+  
     setIsMoving(false);
-
+  
     ptzApi.stop(stream.name)
       .catch(err =>
         console.error(
@@ -395,8 +395,8 @@ export function PTZControls({
           err
         )
       );
-
-  }, [stream?.name, isMoving]);
+  
+  }, [stream?.name]);
 
   const handleHome = useCallback(() => {
 
