@@ -1,0 +1,260 @@
+name: Sync Upstream LightNVR
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Pilih branch tujuan sync"
+        required: true
+        type: choice
+        options:
+          - sycn-main
+          - main
+          - main1
+        default: sycn-main
+
+permissions:
+  contents: write
+
+jobs:
+  selective-sync:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout destination repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.target_branch }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream and fetch
+        run: |
+          git remote remove upstream || true
+          git remote add upstream https://github.com/opensensor/lightNVR.git
+          git fetch upstream main
+
+      - name: Get previous synced commit
+        id: get_last_commit
+        run: |
+          if [ -f .last-upstream-commit ]; then
+            LAST_COMMIT=$(cat .last-upstream-commit)
+          else
+            LAST_COMMIT=$(git rev-parse upstream/main~1)
+          fi
+
+          echo "last_commit=$LAST_COMMIT" >> $GITHUB_OUTPUT
+
+      - name: Get latest upstream commit
+        id: get_latest_commit
+        run: |
+          LATEST=$(git rev-parse upstream/main)
+          echo "latest_commit=$LATEST" >> $GITHUB_OUTPUT
+
+      - name: Determine changed files from upstream
+        id: changed_files
+        run: |
+
+          CHANGED=$(git diff --name-only \
+            ${{ steps.get_last_commit.outputs.last_commit }} \
+            ${{ steps.get_latest_commit.outputs.latest_commit }} \
+            || true)
+
+          echo "$CHANGED" > changed_files.txt
+
+          echo "Changed files:"
+          cat changed_files.txt || true
+
+          if [ -z "$CHANGED" ]; then
+            echo "no_new_commit=true" >> $GITHUB_OUTPUT
+          else
+            echo "no_new_commit=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Clone upstream repo
+        if: steps.changed_files.outputs.no_new_commit == 'false'
+        run: |
+          rm -rf upstream-source
+
+          git clone \
+            --depth=1 \
+            --branch=main \
+            https://github.com/opensensor/lightNVR.git \
+            upstream-source
+
+      - name: Merge and handle conflicts
+        if: steps.changed_files.outputs.no_new_commit == 'false'
+        id: merge
+        run: |
+
+          HAS_CONFLICTS="false"
+
+          while IFS= read -r file || [ -n "$file" ]; do
+
+            [ -z "$file" ] && continue
+
+            echo "🔄 Processing: $file"
+
+            LOCAL="$file"
+            REMOTE="upstream-source/$file"
+            BASE=".git/tmp-base"
+
+            mkdir -p "$(dirname "$LOCAL")"
+
+            git show \
+              "${{ steps.get_last_commit.outputs.last_commit }}:$file" \
+              > "$BASE" 2>/dev/null || touch "$BASE"
+
+            # File baru dari upstream
+            if [ ! -f "$LOCAL" ]; then
+
+              if [ -f "$REMOTE" ]; then
+                cp -a "$REMOTE" "$LOCAL"
+                echo "🆕 New file: $file"
+              fi
+
+              continue
+            fi
+
+            # File dihapus upstream
+            if [ ! -f "$REMOTE" ]; then
+              echo "❌ Deleted: $file"
+              rm -f "$LOCAL"
+              continue
+            fi
+
+            if ! git merge-file \
+              -p \
+              -L LOCAL \
+              -L BASE \
+              -L UPSTREAM \
+              "$LOCAL" \
+              "$BASE" \
+              "$REMOTE" \
+              > "$LOCAL.merged"; then
+
+              echo "⚠️ Conflict: $file"
+              HAS_CONFLICTS="true"
+            fi
+
+            mv "$LOCAL.merged" "$LOCAL"
+
+          done < changed_files.txt
+
+          echo "has_conflicts=$HAS_CONFLICTS" >> $GITHUB_OUTPUT
+
+      - name: Update last upstream commit
+        if: steps.changed_files.outputs.no_new_commit == 'false'
+        run: |
+          echo "${{ steps.get_latest_commit.outputs.latest_commit }}" \
+            > .last-upstream-commit
+
+      - name: Commit upstream changes
+        if: steps.changed_files.outputs.no_new_commit == 'false'
+        run: |
+
+          git add .last-upstream-commit
+
+          while IFS= read -r file || [ -n "$file" ]; do
+            [ -z "$file" ] && continue
+            git add "$file" 2>/dev/null || true
+          done < changed_files.txt
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          if grep -qr '<<<<<<< LOCAL' .; then
+            COMMIT_MSG="⚠️ Sync upstream with conflicts"
+          else
+            COMMIT_MSG="Sync upstream"
+          fi
+
+          git commit -m "$COMMIT_MSG"
+
+      - name: Push changes
+        if: steps.changed_files.outputs.no_new_commit == 'false'
+        run: |
+
+          git remote set-url origin \
+          https://x-access-token:${{ secrets.PAT_WORKFLOW }}@github.com/${{ github.repository }}.git
+
+          git push origin HEAD:${{ github.event.inputs.target_branch }}
+
+      - name: Notify Telegram
+        if: always()
+        run: |
+
+          REPO_URL="https://github.com/${{ github.repository }}"
+          BRANCH="${{ github.event.inputs.target_branch }}"
+
+          FILES=$(git diff-tree \
+            --no-commit-id \
+            --name-status \
+            -r HEAD \
+            | grep -v '\.last-upstream-commit' \
+            | grep -v 'changed_files.txt' \
+            || true)
+
+          if [ -z "$FILES" ]; then
+
+            MSG="🛎️ Sync selesai
+
+Tidak ada update dari upstream."
+
+          else
+
+            MSG="🛎️ *Sync dari upstream selesai*"
+
+            CURRENT_FOLDER=""
+
+            while read status path; do
+
+              [ -z "$path" ] && continue
+
+              FOLDER=$(dirname "$path")
+              FILE=$(basename "$path")
+
+              if [ "$FOLDER" != "$CURRENT_FOLDER" ]; then
+
+                MSG="${MSG}
+
+📁 $FOLDER/ :"
+
+                CURRENT_FOLDER="$FOLDER"
+
+              fi
+
+              case "$status" in
+                A) ICON="🆕" ;;
+                M) ICON="✏️" ;;
+                D) ICON="❌" ;;
+                *) ICON="📄" ;;
+              esac
+
+              if grep -q '<<<<<<< LOCAL' "$path" 2>/dev/null; then
+                CONFLICT=" ⚠️ Konflik"
+              else
+                CONFLICT=""
+              fi
+
+              MSG="${MSG}
+${ICON} ${FILE}${CONFLICT}"
+
+            done <<< "$FILES"
+
+          fi
+
+          curl -s \
+            -X POST \
+            "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            --data-urlencode "text=$MSG" \
+            -d parse_mode="Markdown"
