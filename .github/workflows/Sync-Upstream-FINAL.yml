@@ -198,46 +198,51 @@ jobs:
           FILES=$(git diff --name-status \
             ${{ steps.commits.outputs.last }} \
             ${{ steps.commits.outputs.latest }} \
-            | grep -v "^.github/workflows/" || true)
+            | grep -v "^.github/workflows/" \
+            | grep -v "\.last-upstream-commit" \
+            | grep -v "changed_files.txt" \
+            || true)
 
           if [ -z "$FILES" ]; then
             MSG=$(printf "🛎️ Sync selesai\n\nTidak ada update dari upstream.")
           else
 
             MSG=$(printf "🛎️ *Sync dari upstream selesai*\n")
-            
+
             CURRENT_FOLDER=""
-            
-            while read status path; do
-            
+
+            while read -r status path; do
+
               [ -z "$path" ] && continue
-            
+
               FOLDER=$(dirname "$path")
               FILE=$(basename "$path")
-            
+
               [ "$FOLDER" = "." ] && FOLDER="root"
-            
+
               case "$status" in
-                A*) ICON="🆕";;
-                M*) ICON="✏️";;
-                D*) ICON="❌";;
-                *)  ICON="📄";;
+                A*) ICON="🆕" ;;
+                M*) ICON="✏️" ;;
+                D*) ICON="❌" ;;
+                *)  ICON="📄" ;;
               esac
-            
+
               # Folder baru
               if [ "$FOLDER" != "$CURRENT_FOLDER" ]; then
                 MSG+=$'\n'
                 MSG+="📁 $FOLDER/ :"$'\n'
                 CURRENT_FOLDER="$FOLDER"
               fi
-            
-              MSG+="$ICON [$FILE]($REPO_URL/blob/$BRANCH/$path)"$'\n'
-            
-            done <<< "$FILES"
 
-            if [ "$HAS_CONFLICTS" = "true" ]; then
-              MSG+=$(printf "\n⚠️ *Conflict marker detected*")
-            fi
+              CONFLICT_NOTE=""
+
+              if [ -f "$path" ] && grep -q '<<<<<<< LOCAL' "$path" 2>/dev/null; then
+                CONFLICT_NOTE=" ⚠️ *File Konflik*"
+              fi
+
+              MSG+="$ICON [$FILE]($REPO_URL/blob/$BRANCH/$path)$CONFLICT_NOTE"$'\n'
+
+            done <<< "$FILES"
           fi
 
           curl -s -X POST \
