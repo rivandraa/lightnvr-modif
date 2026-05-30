@@ -222,9 +222,7 @@ jobs:
 
               if [ "$FOLDER" != "$CURRENT_FOLDER" ]; then
 
-                MSG="${MSG}
-
-📁 $FOLDER/ :"
+                MSG="${MSG} 📁 $FOLDER/ :"
 
                 CURRENT_FOLDER="$FOLDER"
 
@@ -243,8 +241,7 @@ jobs:
                 CONFLICT=""
               fi
 
-              MSG="${MSG}
-${ICON} ${FILE}${CONFLICT}"
+              MSG="${MSG} ${ICON} ${FILE}${CONFLICT}"
 
             done <<< "$FILES"
 
